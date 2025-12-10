@@ -616,15 +616,7 @@ function performRefresh() {
     showToast("已刷新：内容已重置 (Key 已保留)", "success");
 }
 
-// 监听键盘快捷键
-// 监听键盘快捷键
-document.addEventListener('keydown', function(e) {
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
-        e.preventDefault(); 
-        console.log("触发快捷键: 打开刷新弹窗");
-        toggleRefreshModal(); // 这里改为调用弹窗函数
-    }
-});
+);
 
         function parseLoreToGraph() {
             isGraphStable = false; // 唤醒
