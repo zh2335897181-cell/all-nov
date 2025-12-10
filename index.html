@@ -1103,8 +1103,49 @@
         }
 
         function insertLoreTemplate(type) { const t={'等级体系':'\n【力量等级】\n1. 凡境：练气、筑基\n2. 灵境：元婴、化神','地理环境':'\n【世界地图】\n东域：修仙宗门\n西漠：魔修','势力组织':'\n【主要势力】\n天道宗：正道\n血煞门：反派'}; document.getElementById('novel-lore').value+=t[type]||''; if(loreViewMode==='graph') parseLoreToGraph(); debounceSave(); }
-        async function aiGenLore() { const p=document.getElementById('novel-prompt').value; if(!p) return showToast("请输入梗概后再使用哦~", "info"); document.getElementById('lore-loading').classList.remove('hidden'); try { const r=await callAI([{role:'user', content:`基于梗概生成世界观（等级、势力等）。格式：\n【大标题】\n名称：描述\n...\n\n梗概：${p}`}]); document.getElementById('novel-lore').value+="\n"+r; if(loreViewMode==='graph') parseLoreToGraph(); debounceSave(); showToast("推演完成", "success"); } catch(e) { showToast(e.message, "error"); } finally { document.getElementById('lore-loading').classList.add('hidden'); } }
+async function aiGenLore() { 
+            const p = document.getElementById('novel-prompt').value; 
+            if(!p) return showToast("请输入梗概后再使用哦~", "info"); 
+            
+            document.getElementById('lore-loading').classList.remove('hidden'); 
+            
+            // --- 修改开始：获取标签并构建提示词 ---
+            const currentTags = (store.tags && store.tags.length > 0) ? store.tags.join(', ') : "无特定风格";
+            
+            // 构建更严格的提示词
+            const systemPrompt = `你是一个网文世界观架构师。
+            1. 必须严格基于用户提供的【风格标签】和【梗概】设计世界观。
+            2. 严禁出现与标签不符的元素（例如：如果没有"赛博朋克"标签，绝不要出现义体、霓虹灯、黑客等元素；如果是"古代"标签，不要出现现代科技）。
+            3. 保持设定逻辑自洽。`;
 
+            const userContent = `基于以下信息生成世界观（等级体系、地理环境、主要势力）。
+            
+            【风格标签】：${currentTags}
+            【核心梗概】：${p}
+            
+            输出格式要求：
+            【大标题】
+            名称：描述
+            ...`;
+            // --- 修改结束 ---
+
+            try { 
+                // 修改调用方式，传入更丰富的上下文
+                const r = await callAI([
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userContent }
+                ]); 
+                
+                document.getElementById('novel-lore').value += "\n" + r; 
+                if(loreViewMode === 'graph') parseLoreToGraph(); 
+                debounceSave(); 
+                showToast("推演完成", "success"); 
+            } catch(e) { 
+                showToast(e.message, "error"); 
+            } finally { 
+                document.getElementById('lore-loading').classList.add('hidden'); 
+            } 
+        }
         function selectChapter(id) { 
             if(!id) return;
             store.currentChapterId = id;
