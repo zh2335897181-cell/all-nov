@@ -130,6 +130,8 @@
                 <div id="engine-status" class="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--panel-border)] bg-[var(--input-bg)]"><span class="w-2 h-2 rounded-full bg-gray-500 transition-colors" id="engine-dot"></span><span id="engine-name" class="text-xs font-mono text-sub">No Key</span></div>
                 
                 <div class="relative shrink-0">
+                    <button onclick="handleRefresh()" class="p-2 rounded-xl hover:bg-[var(--panel-border)] transition text-lg opacity-70 hover:opacity-100 hidden sm:block" title="刷新 (Ctrl+Z)：清空内容，保留Key">🔄</button>
+                    <button onclick="toggleResetModal()" class="p-2 rounded-xl hover:bg-[var(--panel-border)] transition text-lg opacity-70 hover:opacity-100 hidden sm:block text-red-400" title="重置：初始化所有设置">⚠️</button>
                     <button onclick="toggleThemeMenu()" id="theme-btn" class="p-2 rounded-xl hover:bg-[var(--panel-border)] transition text-lg opacity-70 hover:opacity-100" title="设置 & 主题">⚙️</button>
                     <div id="theme-menu" class="absolute right-0 mt-4 w-48 glass-panel rounded-xl overflow-hidden hidden shadow-2xl z-[101] border border-[var(--panel-border)] p-1">
                         <div class="px-3 py-2 text-[10px] text-sub font-bold uppercase tracking-wider opacity-60">Theme</div>
@@ -537,6 +539,80 @@
                 setTimeout(() => { parseLoreToGraph(); }, 50); 
             }
         }
+
+        // --- 新增功能：刷新与快捷键 ---
+
+/**
+ * 刷新功能：清空小说内容、大纲、角色，但保留 API Key 和系统设置
+ */
+function handleRefresh() {
+    // 安全确认，防止误触
+    if(!confirm("⚠️ 确定要刷新吗？\n这将清空当前的小说梗概、角色、大纲和正文。\n您的 API Key 和主题设置将被保留。")) return;
+
+    // 1. 备份需要保留的设置
+    const keptKey = store.apiKey;
+    const keptUrl = store.baseUrl;
+    const keptTheme = store.theme;
+    const keptWordCount = store.defaultWordCount;
+    const keptEngine = store.engine;
+
+    // 2. 重置 Store 对象 (恢复默认值)
+    store = {
+        defaultWordCount: keptWordCount,
+        apiKey: keptKey,
+        baseUrl: keptUrl,
+        theme: keptTheme,
+        engine: keptEngine,
+        // 以下内容被清空
+        concept: '',
+        lore: '',
+        targetChapters: 100,
+        characters: [],
+        outline: [],
+        currentChapterId: null,
+        chapterTexts: {},
+        tags: []
+    };
+
+    // 3. 清空页面上的输入框和编辑器
+    const promptInput = document.getElementById('novel-prompt');
+    if(promptInput) promptInput.value = '';
+    
+    const loreInput = document.getElementById('novel-lore');
+    if(loreInput) loreInput.value = '';
+    
+    const editor = document.getElementById('chapter-editor');
+    if(editor) editor.value = '';
+
+    // 4. 隐藏内容区域并重置列表
+    document.getElementById('section-outline').classList.add('hidden');
+    document.getElementById('section-loom').classList.add('hidden');
+    document.getElementById('chapter-selector').innerHTML = '<option value="">选择章节...</option>';
+    document.getElementById('current-word-count').innerText = "0 Words";
+
+    // 5. 重新渲染 (更新视图)
+    renderCharacters();
+    renderOutline();
+    renderSelectedTags();
+    initGraph();
+
+    // 6. 保存新状态到数据库
+    saveData();
+    showToast("已刷新：内容已重置 (API Key 已保留)", "success");
+}
+
+// 监听键盘快捷键
+document.addEventListener('keydown', function(e) {
+    // 监听 Ctrl + Z (或 Mac 的 Command + Z)
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        // 防止与浏览器默认的“撤销文字”冲突
+        // 只有当焦点不在输入框时，或者用户愿意承担风险时触发
+        // 这里添加 preventDefault 会覆盖系统的撤销功能
+        e.preventDefault(); 
+        console.log("触发快捷键: 刷新");
+        handleRefresh();
+    }
+});
 
         function parseLoreToGraph() {
             isGraphStable = false; // 唤醒
