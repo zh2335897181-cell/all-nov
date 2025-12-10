@@ -1138,20 +1138,65 @@
             }
         }
 
-        async function generateMoreOutline() { 
-            const c=store.outline.length; const t=parseInt(document.getElementById('target-total-chapters').value); 
-            if(c>=t) return showToast("已达目标","info"); 
-            const btn=document.getElementById('btn-add-outline'); const s=document.getElementById('outline-spinner'); 
-            btn.disabled=true; btn.querySelector('span').innerText="推演中..."; s.classList.remove('hidden'); 
-            const ts=(store.tags && store.tags.length>0)?`风格标签：${store.tags.join(', ')}`:""; 
+      async function generateMoreOutline() { 
+            const c = store.outline.length; 
+            const t = parseInt(document.getElementById('target-total-chapters').value); 
+            if(c >= t) return showToast("已达目标章节数","info"); 
+            
+            const btn = document.getElementById('btn-add-outline'); 
+            const s = document.getElementById('outline-spinner'); 
+            btn.disabled = true; 
+            btn.querySelector('span').innerText = "正在推演剧情..."; 
+            s.classList.remove('hidden'); 
+            
+            const styleTags = (store.tags && store.tags.length > 0) ? `风格标签：${store.tags.join(', ')}` : ""; 
+            
             try { 
-                const l=c>0?JSON.stringify(store.outline.slice(-5)):"无"; 
-                const p=`我是大纲策划。核心：${store.concept}。世界观：${store.lore}。${ts}。角色：${JSON.stringify(store.characters.map(x=>x.name))}。生成第${c+1}到${Math.min(c+10,t)}章大纲。紧接：${l}。格式：[{"title":"标题","desc":"剧情"}]。IMPORTANT: RETURN RAW JSON ARRAY ONLY. NO MARKDOWN.`; 
-                const r=await callAI([{role:"system",content:p},{role:"user",content:"生成"}]); 
-                cleanJson(r).forEach((x,i)=>store.outline.push({id:c+i+1, title:x.title, desc:x.desc})); renderOutline(); saveData(); showToast(`成功延展`, "success"); 
-            } catch(e){ showToast(e.message,"error"); } finally{ btn.disabled=false; btn.querySelector('span').innerText="+ 延展剧情"; s.classList.add('hidden'); } 
-        }
+                // 获取最近 5 章大纲作为衔接
+                const recentPlot = c > 0 ? JSON.stringify(store.outline.slice(-5)) : "故事开始"; 
+                const charNames = store.characters.map(x => x.name).join('、');
 
+                // --- 优化点：强制结构化输出 ---
+                const systemPrompt = `你是一个网文大纲策划。
+                核心设定：${store.concept}。
+                ${styleTags}。
+                主要角色：${charNames}。
+                
+                请推演第 ${c+1} 到 ${Math.min(c+10, t)} 章的大纲。
+                
+                【关键要求】：
+                1. 严禁流水账。每一章必须有具体的【冲突】或【爽点】。
+                2. 必须以 JSON 数组格式返回，格式如下：
+                [
+                    {
+                        "title": "吸睛的章节名", 
+                        "desc": "【冲突】：... 【发展】：... 【悬念/结局】：..."
+                    }
+                ]
+                3. NO MARKDOWN. RAW JSON ONLY.`;
+                // ---------------------------
+
+                const r = await callAI([
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: `紧接上文剧情：${recentPlot}。\n请生成后续大纲：` }
+                ]); 
+
+                const newChapters = cleanJson(r);
+                newChapters.forEach((x, i) => {
+                    store.outline.push({ id: c + i + 1, title: x.title, desc: x.desc });
+                });
+                
+                renderOutline(); 
+                saveData(); 
+                showToast(`成功延展 ${newChapters.length} 章剧情`, "success"); 
+            } catch(e) { 
+                showToast("大纲生成失败: " + e.message, "error"); 
+            } finally { 
+                btn.disabled = false; 
+                btn.querySelector('span').innerText = "+ 延展剧情"; 
+                s.classList.add('hidden'); 
+            } 
+        }
         function insertLoreTemplate(type) { const t={'等级体系':'\n【力量等级】\n1. 凡境：练气、筑基\n2. 灵境：元婴、化神','地理环境':'\n【世界地图】\n东域：修仙宗门\n西漠：魔修','势力组织':'\n【主要势力】\n天道宗：正道\n血煞门：反派'}; document.getElementById('novel-lore').value+=t[type]||''; if(loreViewMode==='graph') parseLoreToGraph(); debounceSave(); }
 async function aiGenLore() { 
             const p = document.getElementById('novel-prompt').value; 
@@ -1226,9 +1271,9 @@ async function aiGenLore() {
             }
         }
 
-       async function generateChapterText(cont) { 
+      async function generateChapterText(cont) { 
             const id = store.currentChapterId; 
-            if(!id) return showToast("请先在左下角选择一个章节","error"); 
+            if(!id) return showToast("请先选择章节","error"); 
             
             const ch = store.outline.find(x => x.id == id); 
             const ed = document.getElementById('chapter-editor'); 
@@ -1236,51 +1281,56 @@ async function aiGenLore() {
             
             pnl.classList.add('generating-glow'); 
             const spin = document.getElementById('loading-overlay'); 
-            if(spin) { spin.classList.remove('hidden'); spin.querySelector('p').innerText="AI 正在沉浸创作中..."; } 
+            if(spin) { spin.classList.remove('hidden'); spin.querySelector('p').innerText="AI 正在回溯剧情脉络..."; } // 提示文案改得更有逼格
             
-            // 优化 1：精简角色信息（只取 姓名+标签，防止 Token 溢出）
+            // --- 优化点 1：构建“剧情流”记忆 ---
+            // 获取当前章节之前的 15 章大纲，拼成一个“前情提要”
+            // 这样 AI 就能知道之前发生过什么，而不用消耗正文的巨大 Token
+            const prevOutlines = store.outline
+                .filter(x => x.id < id)
+                .slice(-15) // 取最近 15 章
+                .map(x => `第${x.id}章:${x.desc}`)
+                .join(' -> ');
+            
+            const storyStream = prevOutlines ? `【前情脉络】：${prevOutlines}` : "【前情脉络】：故事开篇";
+            // ----------------------------------
+
             const charSummary = store.characters.map(x => `${x.name}[${x.role}]`).join('，');
-            
-            // 优化 2：根据标签定制文风指令
             const tags = store.tags || [];
-            let styleInstruction = "文笔通俗流畅，代入感强。";
-            if(tags.includes("悬疑") || tags.includes("恐怖")) styleInstruction += "注重环境渲染，营造紧张压抑的氛围。";
-            else if(tags.includes("爽文") || tags.includes("热血")) styleInstruction += "节奏紧凑，期待感拉满，注重情绪调动。";
-            else if(tags.includes("古言") || tags.includes("历史")) styleInstruction += "用词古风典雅，符合时代韵味。";
+            
+            // 简单的文风控制
+            let styleInstruction = "文笔流畅，多用感官描写(Show Don't Tell)。";
+            if(tags.includes("爽文")) styleInstruction += "节奏极快，注重情绪宣泄。";
             
             const wordTarget = ch.targetWords || store.defaultWordCount || "2000-3000";
             
             try { 
                 let msg = []; 
-                // 截取 Lore 防止过长 (取前 1000 字)
-                const shortLore = store.lore.length > 1000 ? store.lore.substring(0, 1000) + "..." : store.lore;
+                const shortLore = store.lore.length > 800 ? store.lore.substring(0, 800)+"..." : store.lore;
 
-                const systemContent = `你是一个金牌网文作家。
-                【写作目标】：将大纲扩写为精彩的正文。
-                【风格要求】：${styleInstruction} 严格遵循标签：${tags.join('+')}。
-                【核心法则】：
-                1. Show, Don't Tell (多用感官描写，少用形容词堆砌)。
-                2. 拒绝流水账，要有具体的场景刻画和对话博弈。
-                3. 字数目标：${wordTarget}字左右。`;
+                // --- 优化点 2：将“剧情流”注入 System Prompt ---
+                const systemContent = `你是一个网文大神。
+                【任务】：根据大纲创作正文。
+                【长期记忆】：${storyStream} (请基于此脉络保持剧情连贯)。
+                【世界观】：${shortLore}。
+                【角色表】：${charSummary}。
+                【要求】：${styleInstruction} 字数${wordTarget}。拒绝流水账，要有冲突和转折。`;
 
                 if(cont) { 
-                    // 续写模式：只取末尾 2000 字作为上下文
-                    const ctx = ed.value.slice(-2000); 
-                    msg = [
-                        { role: "system", content: `${systemContent} \n当前任务：紧接上文续写，保持剧情连贯。` },
-                        { role: "user", content: `【上文回顾】...\n${ctx}\n\n【本章大纲】：${ch.desc}\n\n请继续写：` }
-                    ]; 
-                } else { 
-                    // 起笔模式
+                    const ctx = ed.value.slice(-1500); 
                     msg = [
                         { role: "system", content: systemContent },
-                        { role: "user", content: `【世界观】：${shortLore}\n【登场角色】：${charSummary}\n\n【章节名】：${ch.title}\n【本章剧情】：${ch.desc}\n\n请开始创作正文：` }
+                        { role: "user", content: `【上文回顾】...\n${ctx}\n\n【本章大纲】：${ch.desc}\n\n请紧接上文续写：` }
+                    ]; 
+                } else { 
+                    msg = [
+                        { role: "system", content: systemContent },
+                        { role: "user", content: `【本章标题】：${ch.title}\n【本章大纲】：${ch.desc}\n\n请开始创作：` }
                     ]; 
                 } 
                 
                 if(spin) spin.classList.add('hidden'); 
                 
-                // 流式输出
                 await callAI(msg, (c) => { 
                     ed.value += c; 
                     ed.scrollTop = ed.scrollHeight; 
