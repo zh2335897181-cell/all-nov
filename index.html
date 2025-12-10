@@ -129,7 +129,7 @@
 
                 <div id="engine-status" class="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--panel-border)] bg-[var(--input-bg)]"><span class="w-2 h-2 rounded-full bg-gray-500 transition-colors" id="engine-dot"></span><span id="engine-name" class="text-xs font-mono text-sub">No Key</span></div>
                 
-                <button onclick="handleRefresh()" class="p-2 rounded-xl hover:bg-[var(--panel-border)] transition text-lg opacity-70 hover:opacity-100 hidden sm:block" title="刷新 (Ctrl+Z)：清空内容，保留Key">🔄</button>
+               <button onclick="toggleRefreshModal()" class="p-2 rounded-xl hover:bg-[var(--panel-border)] transition text-lg opacity-70 hover:opacity-100 hidden sm:block" title="刷新 (Ctrl+Z)：清空内容，保留Key">🔄</button>
 
 <button onclick="toggleResetModal()" class="p-2 rounded-xl hover:bg-[var(--panel-border)] transition text-lg opacity-70 hover:opacity-100 hidden sm:block text-red-400" title="重置：初始化所有设置">⚠️</button>
 
