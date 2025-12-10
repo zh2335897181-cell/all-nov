@@ -1078,32 +1078,50 @@
             } catch(e){showToast(e.message,"error")} finally{btn.innerHTML=originalText; btn.disabled=false;} 
         }
 
-        async function aiGenerateCharacter(btn) {
+       async function aiGenerateCharacter(btn) {
             const p = document.getElementById('novel-prompt').value;
             if (!p) return showToast("请先输入核心梗概", "error");
+            
             const originalText = btn.innerHTML;
             btn.innerHTML = "⏳";
             btn.disabled = true;
 
             try {
-                const existingNames = store.characters.map(c => c.name).join('、');
-                const context = existingNames ? `(已知角色: ${existingNames})` : "";
-                const tags = store.tags.length > 0 ? `风格标签:${store.tags.join(',')}` : "";
-                const prompt = `基于核心梗概: "${p}"。${tags}。
-                当前已有角色: ${context}。
+                // 1. 获取风格标签，增强约束力
+                const styleTags = store.tags.length > 0 ? store.tags.join('、') : "无特定风格";
+                
+                // 2. 获取已有角色列表（仅取人名和关系，节省 Token）
+                const existingChars = store.characters.map(c => `${c.name}(${c.role})`).join('、');
+                const charContext = existingChars ? `现有角色：${existingChars}（请生成与他们有新关系的角色）` : "当前是第一个角色";
+
+                // 3. 构建更专业的 Prompt
+                const systemPrompt = `你是一个专业的网文人设策划。
+                1. 风格严格匹配标签：【${styleTags}】。严禁出现不符合时代背景的姓名或职业。
+                2. 角色要有辨识度，避免脸谱化。
+                3. 只返回 RAW JSON 数据，不要 Markdown 格式。`;
+
+                const userPrompt = `基于核心梗概："${p}"。
+                ${charContext}。
+                
                 请构思 1 个新的关键角色。
-                必须返回纯 JSON 对象 (NO MARKDOWN)，格式:
-                {"name": "姓名", "role": "定位", "tags": ["标签1"], "desc": "简述"}`;
+                格式要求：
+                {
+                    "name": "姓名 (符合背景)",
+                    "role": "定位 (如: 反派/死党/金手指)",
+                    "tags": ["标签1", "标签2"], 
+                    "desc": "简述 (包含性格、外貌或核心冲突，50字以内)"
+                }`;
 
                 const res = await callAI([
-                    { role: "system", content: "你是一个专业的网文人设策划。只返回 RAW JSON。" },
-                    { role: "user", content: prompt }
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt }
                 ]);
 
                 let newChar = cleanJson(res);
                 if (Array.isArray(newChar)) newChar = newChar[0];
+                if (!newChar.name) throw new Error("AI 生成数据解析失败");
+                // 容错处理：确保 tags 是数组
                 if (!Array.isArray(newChar.tags)) newChar.tags = [];
-                if (!newChar.name) throw new Error("AI 生成格式异常");
 
                 store.characters.push(newChar);
                 renderCharacters();
@@ -1208,28 +1226,77 @@ async function aiGenLore() {
             }
         }
 
-        async function generateChapterText(cont) { 
-            const id=store.currentChapterId; if(!id) return showToast("选章节","error"); 
-            const ch=store.outline.find(x=>x.id==id); const ed=document.getElementById('chapter-editor'); 
-            const pnl=document.getElementById('loom-panel'); pnl.classList.add('generating-glow'); 
-            const spin=document.getElementById('loading-overlay'); if(spin) { spin.classList.remove('hidden'); spin.querySelector('p').innerText="AI 正在奋笔疾书..."; } 
+       async function generateChapterText(cont) { 
+            const id = store.currentChapterId; 
+            if(!id) return showToast("请先在左下角选择一个章节","error"); 
             
-            const ts=(store.tags && store.tags.length>0)?`风格：${store.tags.join(', ')}`:""; 
-            const mp="长篇网文风格"; 
+            const ch = store.outline.find(x => x.id == id); 
+            const ed = document.getElementById('chapter-editor'); 
+            const pnl = document.getElementById('loom-panel'); 
+            
+            pnl.classList.add('generating-glow'); 
+            const spin = document.getElementById('loading-overlay'); 
+            if(spin) { spin.classList.remove('hidden'); spin.querySelector('p').innerText="AI 正在沉浸创作中..."; } 
+            
+            // 优化 1：精简角色信息（只取 姓名+标签，防止 Token 溢出）
+            const charSummary = store.characters.map(x => `${x.name}[${x.role}]`).join('，');
+            
+            // 优化 2：根据标签定制文风指令
+            const tags = store.tags || [];
+            let styleInstruction = "文笔通俗流畅，代入感强。";
+            if(tags.includes("悬疑") || tags.includes("恐怖")) styleInstruction += "注重环境渲染，营造紧张压抑的氛围。";
+            else if(tags.includes("爽文") || tags.includes("热血")) styleInstruction += "节奏紧凑，期待感拉满，注重情绪调动。";
+            else if(tags.includes("古言") || tags.includes("历史")) styleInstruction += "用词古风典雅，符合时代韵味。";
+            
             const wordTarget = ch.targetWords || store.defaultWordCount || "2000-3000";
             
             try { 
-                let msg=[]; const l=store.lore; const cs=store.characters.map(x=>`${x.name}(${(x.tags||[]).join(',')})`).join(';'); 
-                if(cont){ 
-                    const ctx=ed.value.slice(-1500); 
-                    msg=[{role:"system",content:`续写。${mp} ${ts}。设定:${store.concept}。人物:${cs}。章纲:${ch.desc}。字数要求:${wordTarget}字。`},{role:"user",content:`上文:${ctx}\n续写800字。`}]; 
+                let msg = []; 
+                // 截取 Lore 防止过长 (取前 1000 字)
+                const shortLore = store.lore.length > 1000 ? store.lore.substring(0, 1000) + "..." : store.lore;
+
+                const systemContent = `你是一个金牌网文作家。
+                【写作目标】：将大纲扩写为精彩的正文。
+                【风格要求】：${styleInstruction} 严格遵循标签：${tags.join('+')}。
+                【核心法则】：
+                1. Show, Don't Tell (多用感官描写，少用形容词堆砌)。
+                2. 拒绝流水账，要有具体的场景刻画和对话博弈。
+                3. 字数目标：${wordTarget}字左右。`;
+
+                if(cont) { 
+                    // 续写模式：只取末尾 2000 字作为上下文
+                    const ctx = ed.value.slice(-2000); 
+                    msg = [
+                        { role: "system", content: `${systemContent} \n当前任务：紧接上文续写，保持剧情连贯。` },
+                        { role: "user", content: `【上文回顾】...\n${ctx}\n\n【本章大纲】：${ch.desc}\n\n请继续写：` }
+                    ]; 
                 } else { 
-                    msg=[{role:"system",content:`网文作家。${mp} ${ts}。将大纲扩写为正文。Show don't tell。字数要求:${wordTarget}字。`},{role:"user",content:`世界观:${l}。人物:${cs}。章节:${ch.title}\n大纲:${ch.desc}\n请开始:`}]; 
+                    // 起笔模式
+                    msg = [
+                        { role: "system", content: systemContent },
+                        { role: "user", content: `【世界观】：${shortLore}\n【登场角色】：${charSummary}\n\n【章节名】：${ch.title}\n【本章剧情】：${ch.desc}\n\n请开始创作正文：` }
+                    ]; 
                 } 
+                
                 if(spin) spin.classList.add('hidden'); 
-                await callAI(msg, (c) => { ed.value+=c; ed.scrollTop=ed.scrollHeight; updateWordCount(); }); 
-                store.chapterTexts[id]=ed.value; saveData(); renderOutline(); 
-            } catch(e){ showToast(e.message,"error"); } finally{ if(pnl) pnl.classList.remove('generating-glow'); if(spin) spin.classList.add('hidden'); } 
+                
+                // 流式输出
+                await callAI(msg, (c) => { 
+                    ed.value += c; 
+                    ed.scrollTop = ed.scrollHeight; 
+                    updateWordCount(); 
+                }); 
+                
+                store.chapterTexts[id] = ed.value; 
+                saveData(); 
+                renderOutline(); 
+                
+            } catch(e) { 
+                showToast(e.message, "error"); 
+            } finally { 
+                if(pnl) pnl.classList.remove('generating-glow'); 
+                if(spin) spin.classList.add('hidden'); 
+            } 
         }
 
         async function aiBrainstormTags() { const p=document.getElementById('novel-prompt').value; if(!p) return showToast("请输入梗概后再使用哦~", "info"); showToast("分析中...", "info"); try { const r=await callAI([{role:'user', content:`基于梗概推荐5-8个标签。JSON数组格式。梗概：${p}`}]); const t=cleanJson(r); if(Array.isArray(t)) { let c=0; t.forEach(x=>{if(!store.tags.includes(x)){store.tags.push(x);c++;}}); renderSelectedTags(); renderTagSelector(); saveData(); showToast(`添加 ${c} 个标签`, "success"); } } catch(e) { showToast(e.message, "error"); } }
