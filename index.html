@@ -392,6 +392,19 @@
             </div>
         </div>
     </div>
+    
+    <div id="refresh-modal" class="fixed inset-0 z-[130] hidden">
+    <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" onclick="toggleRefreshModal()"></div>
+    <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 glass-panel rounded-2xl w-11/12 max-w-sm shadow-2xl border border-indigo-500/30 p-6 flex flex-col items-center text-center">
+        <div class="text-4xl mb-4">🔄</div>
+        <h3 class="text-lg font-bold text-main mb-2">刷新创作区？</h3>
+        <p class="text-sm text-sub mb-6 leading-relaxed">这将清空梗概、角色和大纲。<br><span class="text-emerald-400 font-bold">✨ API Key 和设置会被保留</span></p>
+        <div class="flex gap-3 w-full">
+            <button onclick="toggleRefreshModal()" class="flex-1 btn-ghost py-2.5 rounded-xl text-sm">取消</button>
+            <button onclick="performRefresh()" class="flex-1 btn-gradient py-2.5 rounded-xl font-bold text-sm shadow-lg text-white">确认刷新</button>
+        </div>
+    </div>
+</div>
 
     <div id="tag-selector-modal" class="fixed inset-0 z-[120] hidden">
         <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" onclick="toggleTagSelector()"></div>
@@ -542,30 +555,36 @@
             }
         }
 
-        // --- 新增功能：刷新与快捷键 ---
+// --- 修改后的刷新逻辑 ---
 
-/**
- * 刷新功能：清空小说内容、大纲、角色，但保留 API Key 和系统设置
- */
-function handleRefresh() {
-    // 安全确认，防止误触
-    if(!confirm("⚠️ 确定要刷新吗？\n这将清空当前的小说梗概、角色、大纲和正文。\n您的 API Key 和主题设置将被保留。")) return;
+// 1. 开关刷新弹窗
+function toggleRefreshModal() {
+    const modal = document.getElementById('refresh-modal');
+    if (modal) {
+        modal.classList.toggle('hidden');
+    }
+}
 
-    // 1. 备份需要保留的设置
+// 2. 执行刷新 (绑定在弹窗的"确认"按钮上)
+function performRefresh() {
+    // 关闭弹窗
+    toggleRefreshModal();
+
+    // --- 以下是之前的刷新核心逻辑 ---
+    // 1. 备份配置
     const keptKey = store.apiKey;
     const keptUrl = store.baseUrl;
     const keptTheme = store.theme;
     const keptWordCount = store.defaultWordCount;
     const keptEngine = store.engine;
 
-    // 2. 重置 Store 对象 (恢复默认值)
+    // 2. 重置 Store
     store = {
         defaultWordCount: keptWordCount,
         apiKey: keptKey,
         baseUrl: keptUrl,
         theme: keptTheme,
         engine: keptEngine,
-        // 以下内容被清空
         concept: '',
         lore: '',
         targetChapters: 100,
@@ -576,43 +595,34 @@ function handleRefresh() {
         tags: []
     };
 
-    // 3. 清空页面上的输入框和编辑器
-    const promptInput = document.getElementById('novel-prompt');
-    if(promptInput) promptInput.value = '';
-    
-    const loreInput = document.getElementById('novel-lore');
-    if(loreInput) loreInput.value = '';
-    
-    const editor = document.getElementById('chapter-editor');
-    if(editor) editor.value = '';
+    // 3. 清空界面
+    ['novel-prompt', 'novel-lore', 'chapter-editor'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
 
-    // 4. 隐藏内容区域并重置列表
     document.getElementById('section-outline').classList.add('hidden');
     document.getElementById('section-loom').classList.add('hidden');
     document.getElementById('chapter-selector').innerHTML = '<option value="">选择章节...</option>';
     document.getElementById('current-word-count').innerText = "0 Words";
 
-    // 5. 重新渲染 (更新视图)
+    // 4. 重新渲染并保存
     renderCharacters();
     renderOutline();
     renderSelectedTags();
     initGraph();
-
-    // 6. 保存新状态到数据库
     saveData();
-    showToast("已刷新：内容已重置 (API Key 已保留)", "success");
+    
+    showToast("已刷新：内容已重置 (Key 已保留)", "success");
 }
 
 // 监听键盘快捷键
+// 监听键盘快捷键
 document.addEventListener('keydown', function(e) {
-    // 监听 Ctrl + Z (或 Mac 的 Command + Z)
     if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
-        // 防止与浏览器默认的“撤销文字”冲突
-        // 只有当焦点不在输入框时，或者用户愿意承担风险时触发
-        // 这里添加 preventDefault 会覆盖系统的撤销功能
         e.preventDefault(); 
-        console.log("触发快捷键: 刷新");
-        handleRefresh();
+        console.log("触发快捷键: 打开刷新弹窗");
+        toggleRefreshModal(); // 这里改为调用弹窗函数
     }
 });
 
